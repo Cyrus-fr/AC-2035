@@ -1,0 +1,181 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── AC-2035 design tokens ─────────────────────────────────────────────── */
+:root {
+  --bg-base: #0a0e1a;
+  --bg-surface: #0f1521;
+  --bg-elevated: #151c2e;
+  --bg-overlay: #1a2236;
+  --border: #1e2d45;
+  --border-glow: #2a4060;
+
+  --accent-cyan: #00d4ff;
+  --accent-purple: #8b5cf6;
+  --accent-green: #00ff88;
+  --accent-red: #ff3366;
+  --accent-amber: #ffaa00;
+
+  --text-primary: #e2e8f0;
+  --text-secondary: #8899aa;
+  --text-dim: #445566;
+
+  --glow-cyan: 0 0 20px rgba(0, 212, 255, 0.3);
+  --glow-red: 0 0 20px rgba(255, 51, 102, 0.4);
+  --glow-green: 0 0 15px rgba(0, 255, 136, 0.3);
+  --glow-purple: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    /* Animated grid background — 40px lines at ~3% opacity, gives depth. */
+    background-image:
+      linear-gradient(rgba(42, 64, 96, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(42, 64, 96, 0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg-surface);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-glow);
+    border-radius: 4px;
+  }
+}
+
+/* ── Scanline overlay — full-viewport CRT texture at ~3% opacity ────────── */
+.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.03) 0px,
+    rgba(255, 255, 255, 0.03) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.5;
+}
+
+/* ── Tech corner brackets (used by TechCard) ───────────────────────────── */
+.tech-corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--border-glow);
+  pointer-events: none;
+  transition: border-color 0.2s ease;
+}
+.tech-corner-tl {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.tech-corner-tr {
+  top: -1px;
+  right: -1px;
+  border-top: 1px solid;
+  border-right: 1px solid;
+}
+.tech-corner-bl {
+  bottom: -1px;
+  left: -1px;
+  border-bottom: 1px solid;
+  border-left: 1px solid;
+}
+.tech-corner-br {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.7;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(255, 51, 102, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(255, 51, 102, 0.7);
+  }
+}
+.animate-glow-pulse {
+  animation: glow-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes slide-in-top {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-slide-in-top {
+  animation: slide-in-top 0.2s ease-out;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+@keyframes fade-update {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.animate-fade-update {
+  animation: fade-update 0.4s ease-out;
+}

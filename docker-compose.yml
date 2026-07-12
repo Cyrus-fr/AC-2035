@@ -1,0 +1,109 @@
+# AC-2035 — local development stack.
+#   1. cp .env.example .env   (then edit values)
+#   2. docker compose up -d
+#
+# Services:
+#   neo4j     graph store       browser :7474  bolt :7687
+#   postgres  Zitadel backend   (internal only)
+#   zitadel   identity provider :8081
+#   api       FastAPI placeholder :8000  (GET /health -> {"status":"ok"})
+name: ac-2035
+
+services:
+  neo4j:
+    image: neo4j:5.26
+    container_name: ac2035-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP browser
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-change-me-neo4j}"
+      NEO4J_server_memory_pagecache_size: 512M
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ac2035-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:latest
+    container_name: ac2035-zitadel
+    restart: unless-stopped
+    command: 'start-from-init --masterkeyFromEnv --tlsMode disabled'
+    environment:
+      ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:-MasterkeyNeedsToHave32Characters}
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_DOMAIN:-localhost}
+      ZITADEL_EXTERNALPORT: 8081
+      # Fresh Zitadel instances default to requiring the standalone Login V2
+      # (zitadel-login, Next.js) container and will redirect-loop/404 without
+      # it. We don't run that container in Phase 0, so force the legacy
+      # bundled login engine instead.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
+      ZITADEL_DATABASE_POSTGRES_HOST: postgres
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: ${POSTGRES_USER:-postgres}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8080"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: ac2035-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me-neo4j}
+      # Phase 1+ pulls in google-cloud-pubsub / google-cloud-logging. Those
+      # clients read project/region from the process environment at
+      # construction time and raise immediately if absent — wire them here
+      # now instead of debugging a crash-on-import later.
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
+      GCP_REGION: ${GCP_REGION:-us-central1}
+      PUBSUB_TRIGGER_TOPIC: ${PUBSUB_TRIGGER_TOPIC:-honeytoken-triggers}
+      PUBSUB_TELEMETRY_TOPIC: ${PUBSUB_TELEMETRY_TOPIC:-telemetry-raw}
+    depends_on:
+      neo4j:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  postgres_data:

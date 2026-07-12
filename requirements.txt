@@ -1,0 +1,33 @@
+# AC-2035 — Python dependencies (Python 3.11+)
+
+# ── API ──────────────────────────────────────────────
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.7
+
+# ── Graph ────────────────────────────────────────────
+neo4j>=5.19
+
+# ── GCP ──────────────────────────────────────────────
+google-cloud-pubsub>=2.21
+google-cloud-logging>=3.10
+google-cloud-secret-manager>=2.20
+
+# ── Kubernetes / GKE ─────────────────────────────────
+kubernetes>=29.0
+
+# ── Deployer (honeytoken generation, injection, rotation) ─
+APScheduler>=3.10
+typer>=0.12
+rich>=13.7
+
+# ── Utils ────────────────────────────────────────────
+python-dotenv>=1.0
+httpx>=0.27
+mitreattack-python>=3.0
+loguru>=0.7
+
+# asyncio is part of the Python 3.11 standard library — no install required.
+# Listed here per spec; installing the PyPI backport on 3.11 would shadow stdlib
+# and is intentionally omitted.
+# asyncio

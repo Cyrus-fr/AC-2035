@@ -1,0 +1,69 @@
+# ── Secrets / env ────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+service-account*.json
+credentials.json
+
+# ── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Deployer runtime state ───────────────────────────
+deployer/registry.db
+
+# ── Collector runtime state ──────────────────────────
+collector/timelines/
+
+# ── Backtrace / kill-switch runtime state ────────────
+backtrace/attacks/
+killswitch/audit/
+
+# ── Terraform ────────────────────────────────────────
+infra/.terraform/
+infra/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
+# ── Node / dashboard ─────────────────────────────────
+node_modules/
+dashboard/dist/
+dashboard/build/
+.npm/
+*.log
+
+# ── Docker ───────────────────────────────────────────
+*.pid
+
+# ── Editors / OS ─────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# ── eBPF build artifacts ─────────────────────────────
+detector/ebpf/*.o
+detector/ebpf/vmlinux.h
+
+# ── Dashboard env ─────────────────────────────────────
+dashboard/.env
+!dashboard/.env.example
