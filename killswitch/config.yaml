@@ -1,0 +1,36 @@
+# AC-2035 kill-switch configuration.
+#
+# The orchestrator loads every provider with `enabled: true` from this file at
+# runtime (importlib). Adding a control plane = one entry here + a Provider
+# subclass in killswitch/providers/ — no orchestrator code change.
+
+providers:
+  - name: gcp
+    class: "killswitch.providers.gcp:GCPProvider"
+    enabled: true
+  - name: cloudflare
+    class: "killswitch.providers.cloudflare:CloudflareProvider"
+    enabled: true
+  - name: zitadel
+    class: "killswitch.providers.zitadel:ZitadelProvider"
+    enabled: true
+  # Multi-cloud stubs — implementation deferred to U10. Keep disabled.
+  - name: aws
+    class: "killswitch.providers.aws:AWSProvider"
+    enabled: false
+  - name: azure
+    class: "killswitch.providers.azure:AzureProvider"
+    enabled: false
+
+# U3 — after each action fires, re-fetch the control plane to confirm it took
+# effect. A fired-but-unverified action downgrades the whole run to "partial".
+verify_actions: true
+
+# U2 — compensating-transaction rollback.
+# DEFAULT false: containment is STICKY. Rolling back a *successful* containment
+# action just because a sibling action failed can re-expose the attacker (e.g.
+# un-blocking their IP because the Zitadel call failed). We keep partial
+# containment rather than risk un-containment; an analyst can roll back
+# explicitly. Flip to true only if you accept that atomicity-over-security
+# trade-off.
+rollback_on_partial: false

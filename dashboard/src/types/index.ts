@@ -96,6 +96,8 @@ export interface KillSwitchAction {
   success: boolean;
   error: string | null;
   timestamp: string;
+  verified?: boolean | null;
+  rolled_back?: boolean | null;
 }
 
 export interface KillSwitchResult {
@@ -112,6 +114,19 @@ export interface PendingItem {
   token_id: string | null;
   entry_point?: string | null;
   confidence?: string | null;
+}
+
+// A notifier fallback (.alert) record — written when an external channel fails
+// (U0). Surfaced by GET /api/notifications so a dead webhook can't hide alerts.
+export interface FallbackAlert {
+  kind?: string;
+  token_id?: string | null;
+  title?: string;
+  severity?: string;
+  fields?: Record<string, unknown>;
+  timestamp?: string;
+  fallback?: boolean;
+  written_at?: string;
 }
 
 export interface TriggerResponse {

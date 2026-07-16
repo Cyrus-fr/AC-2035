@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type {
   AttackObject,
+  FallbackAlert,
   GraphData,
   GraphStats,
   KillSwitchResult,
@@ -104,6 +105,15 @@ export const api = {
       return data;
     } catch (err) {
       if (is404(err)) return null;
+      wrap(err);
+    }
+  },
+
+  async getNotifications(limit = 50): Promise<FallbackAlert[]> {
+    try {
+      const { data } = await http.get<FallbackAlert[]>('/api/notifications', { params: { limit } });
+      return data;
+    } catch (err) {
       wrap(err);
     }
   },

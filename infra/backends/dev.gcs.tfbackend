@@ -1,0 +1,8 @@
+# ARTIFACT-ONLY: written to spec, not deployed.
+# Requires GCP project + terraform apply on Linux.
+# See Live Verification Checklist in infra/README.md
+#
+# Dev remote state. Usage:
+#   terraform init -backend-config=backends/dev.gcs.tfbackend
+bucket = "ac2035-tfstate-dev"
+prefix = "dev"

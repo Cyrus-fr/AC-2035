@@ -20,7 +20,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from api import websocket
 from api.models import HealthResponse
-from api.routes import alerts, graph, killswitch, tokens
+from api.routes import alerts, graph, killswitch, notifications, tokens
 
 
 @asynccontextmanager
@@ -58,6 +58,7 @@ app.include_router(graph.router)
 app.include_router(alerts.router)
 app.include_router(tokens.router)
 app.include_router(killswitch.router)
+app.include_router(notifications.router)
 app.include_router(websocket.router)  # /ws
 
 

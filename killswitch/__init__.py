@@ -66,13 +66,34 @@ class ActionResult:
     success: bool
     error: Optional[str]
     timestamp: str
+    # Undo info captured by a provider's execute() so the orchestrator can
+    # later rollback() the action (U2). Providers populate this on success.
+    rollback_state: Optional[dict] = None
+    # Set by the orchestrator after re-fetching the provider to confirm the
+    # action took effect (U3). None = not verified; False = verification failed.
+    verified: Optional[bool] = None
+    # Set by the orchestrator if a compensating rollback was attempted (U2).
+    rolled_back: Optional[bool] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def make_action(action_type: str, target: str, success: bool, error: Optional[str]) -> ActionResult:
-    return ActionResult(action_type=action_type, target=target, success=success, error=error, timestamp=now_iso())
+def make_action(
+    action_type: str,
+    target: str,
+    success: bool,
+    error: Optional[str],
+    rollback_state: Optional[dict] = None,
+) -> ActionResult:
+    return ActionResult(
+        action_type=action_type,
+        target=target,
+        success=success,
+        error=error,
+        timestamp=now_iso(),
+        rollback_state=rollback_state,
+    )
 
 
 @dataclass

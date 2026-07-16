@@ -1,0 +1,10 @@
+# ARTIFACT-ONLY: written to spec, not deployed.
+# Requires GCP project + terraform apply on Linux.
+# See Live Verification Checklist in infra/README.md
+#
+# CI remote state. Each CI run injects a unique per-run prefix so concurrent
+# runs never share state:
+#   terraform init -backend-config=backends/ci.gcs.tfbackend \
+#                  -backend-config="prefix=run-${GITHUB_SHA}"
+bucket = "ac2035-tfstate-ci"
+prefix = "ci"

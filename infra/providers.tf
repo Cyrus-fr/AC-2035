@@ -9,6 +9,11 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Remote state in GCS (U12). Partial config — bucket/prefix are supplied at
+  # init time from backends/<env>.gcs.tfbackend. For OFFLINE validation that
+  # never touches GCS: `terraform init -backend=false && terraform validate`.
+  backend "gcs" {}
 }
 
 provider "google" {

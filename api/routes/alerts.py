@@ -80,4 +80,22 @@ async def trigger(event: TriggerEventBody) -> TriggerResponse:
         },
     ))
 
+    # U0 — best-effort external alert (Slack/Discord/PagerDuty + .alert fallback).
+    try:
+        import notifier
+
+        notifier.notify(
+            "honeytoken_trigger",
+            token_id=event.token_id,
+            summary=f"Honeytoken {event.token_id} triggered from {attack.entry_point}",
+            fields={
+                "entry_point": attack.entry_point,
+                "confidence": attack.confidence,
+                "killswitch_status": result.status,
+                "mode": mode,
+            },
+        )
+    except Exception as e:  # notifier is non-fatal
+        logger.warning("Notifier hook failed (non-fatal): {}", e)
+
     return TriggerResponse(attack_object=attack.to_dict(), killswitch_result=result.to_dict())

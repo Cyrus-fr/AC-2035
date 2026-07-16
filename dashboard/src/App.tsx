@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TopBar } from './components/Layout/TopBar';
+import { FallbackBanner } from './components/Layout/FallbackBanner';
 import { AttackGraph } from './components/Graph/AttackGraph';
 import { AlertFeed } from './components/Alerts/AlertFeed';
 import { TokenBoard } from './components/Tokens/TokenBoard';
@@ -22,6 +23,7 @@ export default function App() {
   return (
     <div className="scanlines flex h-screen flex-col bg-base text-primary">
       <TopBar connected={ws.connected} />
+      <FallbackBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar
           active={view}

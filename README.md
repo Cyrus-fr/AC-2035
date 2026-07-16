@@ -210,34 +210,49 @@ confidence and MITRE techniques.
 
 ## Kill-Switch Orchestrator
 
-`killswitch/` takes a Phase 4 `AttackObject` and fires three containment
-actions **in parallel** — revoke the compromised identity's GCP IAM roles,
-block the attacker IP at Cloudflare, and terminate its Zitadel sessions —
-writing a full JSON audit trail for every attempt.
+`killswitch/` takes a Phase 4 `AttackObject` and fires containment actions
+**in parallel** across a **pluggable set of providers** — revoke the
+compromised identity's GCP IAM roles, block the attacker IP at Cloudflare, and
+terminate its Zitadel sessions — **verifying** each action and writing a full
+JSON audit trail for every attempt.
 
 - `orchestrator.py` — coordinator; `execute(attack, mode)` and
-  `approve(pending_id)`, fires the three handlers via a `ThreadPoolExecutor`
-  and writes the audit log.
-- `gcp_iam.py` — `revoke()` strips every role bound to the identity from the
-  project IAM policy (Cloud Resource Manager REST via google-auth).
-- `cloudflare.py` — `block_ip()` creates a Firewall Rules block on the entry
-  IP.
-- `zitadel.py` — `kill_sessions()` finds the user and deletes every active
-  session via the Management API.
+  `approve(pending_id)` load the enabled providers from `config.yaml`, fire
+  them via a `ThreadPoolExecutor`, verify each, and write the audit log.
+- `config.yaml` — the provider registry + `verify_actions` / `rollback_on_partial`
+  toggles. Enabling a control plane is one line here (U2).
+- `providers/base.py` — the `Provider` interface: `available()`, `execute()`,
+  `verify()`, `rollback()`.
+- `providers/gcp.py` / `cloudflare.py` / `zitadel.py` — the three built-in
+  providers. `providers/aws.py` / `azure.py` — disabled stubs (U10).
 
-**Auto vs manual mode:** `execute(attack, mode="auto")` fires all three
-actions immediately; `mode="manual"` stashes the attack and returns a
-`pending_id` with status `pending`, and an analyst later calls
-`approve(pending_id)` to fire them (recorded as `triggered_by: analyst`).
+**Provider abstraction (U2):** providers are discovered dynamically from
+`config.yaml` via `importlib` — drop in a `Provider` subclass and add a YAML
+line to wire up AWS, Okta, etc., with no orchestrator edit.
 
-**Partial success is tracked per action, not all-or-nothing:** status is
-`executed` (all three succeeded), `partial` (some succeeded), or `failed`
-(none did) — one failing action never sinks the others. Every handler
-degrades gracefully when its credentials are missing (the expected result
-in local dev), returning an `ActionResult` instead of crashing.
+**Action verification (U3):** after each action fires, the orchestrator
+re-fetches the control plane to confirm it took effect (IAM member absent,
+firewall rule present, sessions gone). A fired-but-unverified action downgrades
+the run to `partial`.
 
-All three actions **fire in parallel** (ThreadPoolExecutor). Audit logs are
-saved to `killswitch/audit/{token_id}_{timestamp}.json`.
+**Compensating rollback (U2) — OFF by default:** when `rollback_on_partial: true`
+and a run is `partial`, the orchestrator undoes the actions that *did* succeed.
+This is **opt-in** because rolling back a successful containment action can
+re-expose the attacker (e.g. un-blocking their IP because the Zitadel call
+failed) — AC-2035 keeps containment **sticky** and leaves rollback to an
+explicit analyst decision. (Zitadel session-kill is irreversible; its rollback
+is a documented no-op.)
+
+**Auto vs manual mode:** `mode="auto"` fires immediately; `mode="manual"`
+stashes the attack and returns a `pending_id` for an analyst to `approve()`
+(recorded as `triggered_by: analyst`).
+
+**Status:** `executed` (all actions fully ok), `partial` (some), or `failed`
+(none) — one failing provider never sinks the others. Every provider degrades
+gracefully and **loudly** (a clear `ERROR` with the remedy) when its
+credentials are missing — the expected result in local dev — returning an
+`ActionResult` instead of crashing. Audit logs are saved to
+`killswitch/audit/{token_id}_{timestamp}.json`.
 
 Run the end-to-end demo (no live GCP/Cloudflare/Zitadel needed):
 
@@ -403,6 +418,36 @@ at 30s) and drops a "WebSocket reconnected" system alert into the feed when it
 recovers. **`token_value` is never rendered anywhere** — the UI always shows
 `••••••••`.
 
+## Production Upgrades — Critical Tier
+
+Beyond the 8 build phases, AC-2035 is hardening into a deployable system. The
+**Critical tier** (U0–U3, U12) is complete:
+
+- **U0 — External alerting** (`notifier/`): honeytoken triggers and kill-switch
+  fires fan out to Slack / Discord / PagerDuty with a per-channel **circuit
+  breaker**. If a webhook fails (404/403/timeout), the notifier logs `CRITICAL`
+  and writes a local `.alert` file the dashboard surfaces (`GET /api/notifications`)
+  — a dead webhook can't silence alerts. It is best-effort and **never blocks or
+  crashes** the kill-switch. Set `SLACK_WEBHOOK_URL` / `DISCORD_WEBHOOK_URL` /
+  `PAGERDUTY_ROUTING_KEY` in `.env` (all optional).
+- **U1 — No silent simulation**: simulation is opt-in only. The collector
+  listener runs on Pub/Sub with a real `GCP_PROJECT_ID`, or refuses to start
+  (loud `CRITICAL`) unless you pass `--simulate` (or set `AC2035_SIMULATE=1`).
+  It never silently fabricates telemetry.
+- **U2 / U3 — Pluggable providers, verification, opt-in rollback**: see the
+  Kill-Switch Orchestrator section above.
+- **U12 — Immutable audit + isolated CI state** (`infra/`, **artifact-only**):
+  a GCS Object-Lock audit bucket and per-environment (`prod`/`dev`/`ci`) remote
+  state backends. Written to spec but **not deployed** from the repo — see
+  `infra/README.md` for the live-verification checklist.
+
+Run the logic tests (no cloud or kernel needed):
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
 ## Build Phases
 
 - [x] **Phase 0** — Environment setup (repo structure, Docker Compose, Terraform foundation)
@@ -444,4 +489,6 @@ open http://localhost:5173
 ```
 
 Everything runs locally with graceful degradation — no live GCP, Cloudflare,
-or Zitadel credentials are required for the local demo flow.
+or Zitadel credentials are required for the local demo flow. External alerting
+(Slack/Discord/PagerDuty) is optional; without it, alerts fall back to local
+`.alert` files surfaced at `GET /api/notifications`.

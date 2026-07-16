@@ -2,9 +2,10 @@
 collection pipeline (GCP logs + VPC Flow + Cloudflare -> normalized
 timeline) for each trigger event received.
 
-Falls back to a local simulation mode — trigger events read as JSON lines
-from stdin — when GCP_PROJECT_ID is empty, so the pipeline is runnable
-without a live GCP project.
+Simulation mode (trigger events read as JSON lines from stdin) is entered ONLY
+via an explicit --simulate flag (or AC2035_SIMULATE=1) — never implicitly.
+Without a usable GCP_PROJECT_ID and without --simulate the listener refuses to
+run rather than silently fabricate telemetry (U1).
 """
 
 from __future__ import annotations
@@ -115,7 +116,7 @@ def _run_pubsub_mode(project_id: str) -> None:
 
 def _run_simulation_mode() -> None:
     logger.warning(
-        "GCP_PROJECT_ID is empty — running in local simulation mode. "
+        "Running in EXPLICIT simulation mode (--simulate / AC2035_SIMULATE=1). "
         "Paste a TriggerEvent JSON object per line on stdin (Ctrl+D / Ctrl+Z then Enter to exit)."
     )
     # Windows' default stdin codec (cp1252 here) mangles UTF-8 text piped in
@@ -136,16 +137,57 @@ def _run_simulation_mode() -> None:
             logger.warning("Failed to process simulated trigger: {}", e)
 
 
-def start_listener() -> None:
-    project_id = os.getenv("GCP_PROJECT_ID", "")
+_PLACEHOLDER_PREFIXES = ("your-", "change-me")
+
+
+def _real_project_id() -> str:
+    """GCP_PROJECT_ID, or "" if it's unset or a .env.example placeholder."""
+    val = os.getenv("GCP_PROJECT_ID", "").strip()
+    if not val or val.lower().startswith(_PLACEHOLDER_PREFIXES):
+        return ""
+    return val
+
+
+def _simulate_requested(cli_flag: bool = False) -> bool:
+    """Simulation is opt-in only: the --simulate flag or AC2035_SIMULATE=1."""
+    if cli_flag:
+        return True
+    return os.getenv("AC2035_SIMULATE", "").strip().lower() in ("1", "true", "yes")
+
+
+def start_listener(simulate: bool = False) -> None:
+    """Listen on Pub/Sub for triggers. Enters stdin simulation ONLY when
+    explicitly requested; otherwise, with no usable GCP_PROJECT_ID, it refuses
+    to run rather than silently fabricate telemetry (U1)."""
+    if _simulate_requested(simulate):
+        _run_simulation_mode()
+        return
+
+    project_id = _real_project_id()
     if project_id:
         _run_pubsub_mode(project_id)
-    else:
-        _run_simulation_mode()
+        return
+
+    logger.critical(
+        "GCP_PROJECT_ID is not set (or is a placeholder) and --simulate was not "
+        "passed. Refusing to silently fabricate telemetry. Set GCP_PROJECT_ID in "
+        ".env to listen on Pub/Sub, or pass --simulate to read TriggerEvents from stdin."
+    )
+    sys.exit(1)
 
 
 if __name__ == "__main__":
+    import argparse
+
     from dotenv import load_dotenv
 
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-    start_listener()
+
+    parser = argparse.ArgumentParser(description="AC-2035 collector Pub/Sub listener")
+    parser.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Read TriggerEvents as JSON lines from stdin instead of Pub/Sub (no GCP required).",
+    )
+    args = parser.parse_args()
+    start_listener(simulate=args.simulate)

@@ -83,6 +83,8 @@ class KillSwitchActionModel(BaseModel):
     success: bool
     error: Optional[str] = None
     timestamp: str
+    verified: Optional[bool] = None
+    rolled_back: Optional[bool] = None
 
 
 class KillSwitchResultResponse(BaseModel):

@@ -33,6 +33,9 @@ collector/timelines/
 backtrace/attacks/
 killswitch/audit/
 
+# ── Notifier fallback alerts (U0) ────────────────────
+notifier/fallback_alerts/
+
 # ── Terraform ────────────────────────────────────────
 infra/.terraform/
 infra/.terraform.lock.hcl
