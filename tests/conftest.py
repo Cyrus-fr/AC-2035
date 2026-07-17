@@ -15,6 +15,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 import notifier  # noqa: E402
+import research.immutable_sink as _immutable_sink  # noqa: E402
 from killswitch import orchestrator  # noqa: E402
 
 
@@ -26,6 +27,10 @@ def _isolate(tmp_path, monkeypatch):
     # Kill-switch tests shouldn't spawn the fire-and-forget notifier thread;
     # the notifier has its own tests that call dispatch() directly.
     monkeypatch.setattr(notifier, "notify", lambda *a, **k: None)
+    # U11 — kill-switch tests shouldn't write to the immutable sink's local
+    # mirror; the sink has its own tests using ImmutableSink directly.
+    monkeypatch.setattr(_immutable_sink, "write_audit", lambda *a, **k: None)
+    monkeypatch.setattr(_immutable_sink, "write_raw_telemetry", lambda *a, **k: None)
     yield
     orchestrator._CONFIG_PATH = orig_cfg
     orchestrator.reload_providers()

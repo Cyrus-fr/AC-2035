@@ -19,7 +19,12 @@ services:
       - "7687:7687"   # Bolt
     environment:
       NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-change-me-neo4j}"
-      NEO4J_server_memory_pagecache_size: 512M
+      # U6 — tuned for a small local graph. Neo4j 5.x env mapping: dots -> _,
+      # and a literal underscore in the config key -> __ (so the config
+      # server.memory.heap.initial_size becomes ..._heap_initial__size).
+      NEO4J_server_memory_heap_initial__size: 128m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 256m
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs

@@ -41,6 +41,9 @@ class AttackObject:
     mitre_techniques: list[MitreTechnique] = field(default_factory=list)
     all_paths: list[ScoredPath] = field(default_factory=list)
     reconstructed_at: str = ""
+    # U7 — first-class "we couldn't attribute this" state, distinct from a
+    # low-confidence reconstruction.
+    unattributed: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -53,6 +56,7 @@ class AttackObject:
             "mitre_techniques": [t.to_dict() for t in self.mitre_techniques],
             "all_paths": [p.to_dict() for p in self.all_paths],
             "reconstructed_at": self.reconstructed_at,
+            "unattributed": self.unattributed,
         }
 
 
@@ -115,17 +119,18 @@ def run_backtrace(trigger_event, driver=None) -> AttackObject:
     # 2. Ingest into Neo4j (idempotent — MERGE on nodes).
     ingest_events(timeline, driver=driver, token_id=token_id, token_type=trigger_event.token_type)
 
-    # 3-4. Correlate: CF-Ray → entry IP, with temporal fallback.
-    cf_ray = correlator.find_cf_ray(trigger_event, timeline)
-    if cf_ray:
-        entry_ip = correlator.trace_entry(cf_ray, timeline, driver=driver)
-    else:
-        entry_ip = correlator.temporal_entry(trigger_event, timeline)
-
-    if entry_ip:
-        vpc_chain = correlator.find_vpc_chain(entry_ip, trigger_dt, timeline, driver=driver)
-        if len(vpc_chain) > 1:
-            logger.info("VPC lateral chain: {}", " -> ".join(vpc_chain))
+    # 3-4. Correlate via the priority strategy chain (U7): CF-Ray -> VPC Flow ->
+    # temporal clustering + process lineage -> unattributed. An unattributed
+    # result short-circuits — we refuse to force a low-confidence path.
+    result = correlator.correlate_entry(trigger_event, timeline, driver=driver)
+    if result.unattributed:
+        logger.warning("Token {} unattributed — no correlation strategy matched", token_id)
+        attack = _empty(token_id, reconstructed_at, blast_radius)
+        attack.unattributed = True
+        return attack
+    entry_ip = result.entry_ip
+    if result.chain and len(result.chain) > 1:
+        logger.info("VPC lateral chain ({}): {}", result.strategy, " -> ".join(result.chain))
 
     # 5. Candidate paths from the graph.
     paths = path_finder.find_paths(token_id, entry_ip, driver=driver)

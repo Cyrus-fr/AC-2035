@@ -82,6 +82,15 @@ def run_pipeline(trigger: TriggerEvent) -> list[NormalizedEvent]:
     timeline = build_timeline(k8s_events, flow_events, cf_events)
     save_timeline(trigger.token_id, timeline)
 
+    # U11 — stream raw telemetry to the immutable sink BEFORE any backtrace
+    # processing (best-effort; never fatal).
+    try:
+        from research import immutable_sink
+
+        immutable_sink.write_raw_telemetry(trigger.token_id, [e.to_dict() for e in timeline])
+    except Exception as e:
+        logger.warning("Immutable sink (raw) hook failed (non-fatal): {}", e)
+
     logger.info(
         "Pipeline complete for token {}: {} events ({} k8s, {} vpc_flow, {} cloudflare)",
         trigger.token_id, len(timeline), len(k8s_events), len(flow_events), len(cf_events),

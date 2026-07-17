@@ -448,6 +448,48 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
+## Production Upgrades — Important Tier
+
+The **Important tier** (U4–U7, U11, U13) hardens detection + attribution and adds
+research / CI scaffolding.
+
+- **U4 — eBPF tamper detection** (`detector/`): a watchdog thread periodically
+  verifies the eBPF programs are still attached and their maps still pinned under
+  `/sys/fs/bpf/ac2035/`; if a hook disappears it publishes a `CRITICAL` Pub/Sub
+  alert (+ notifier) and reloads the program. *Locally verified:* the watchdog
+  logic (mocked loader). *Artifact-only:* the kernel attach / pin / reload
+  (Linux + root).
+- **U5 — Confidence calibration** (`backtrace/calibrator.py`): runs labeled
+  scenarios through the engine and reports **precision + recall per confidence
+  tier** (paper-ready markdown / JSON), so HIGH/MEDIUM/LOW actually mean
+  something. *Locally verified* with a mocked engine.
+- **U6 — Neo4j tuning + pruning** (`docker-compose.yml`, `graph/pruner.py`):
+  bounded heap (128m/512m) + 256m page cache; a pruner deletes relationships and
+  the nodes they orphan older than 7 days and raises a `CRITICAL` alert past
+  10,000 nodes. *Locally verified* (pruner logic + compose config).
+- **U7 — Correlation hardening** (`backtrace/correlator.py`): a priority
+  strategy chain — CF-Ray → VPC-Flow source IP → temporal clustering + eBPF
+  process lineage → **unattributed**. An unattributed trigger is a first-class
+  state now, not a forced low-confidence path. *Locally verified* with mocked
+  timelines. (Feeding real eBPF process events into the timeline is a follow-up.)
+- **U11 — Immutable audit sink** (`research/immutable_sink.py`): streams raw
+  telemetry first, processed results second, to the U12 GCS Object-Lock bucket —
+  before backtrace runs. Degrades to a local mirror without GCS. *Locally
+  verified* (sink logic + ordering, mocked client). *Artifact-only:* live
+  Object-Lock writes.
+- **U13 — Two-track CI** (`.github/workflows/`): **Track A** (`ci-unit.yml`,
+  real) runs `pytest tests/` as the merge gate; **Track B** (`ci-integration.yml`
+  + `infra/cloudbuild.yaml`, artifact-only) spins up ephemeral GKE with real
+  eBPF, runs the scenarios, and gates on backtrace accuracy > 90%. See
+  `.github/README.md`.
+
+The full suite (26 tests) runs on any box — no cloud, kernel, or Docker needed:
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
 ## Build Phases
 
 - [x] **Phase 0** — Environment setup (repo structure, Docker Compose, Terraform foundation)

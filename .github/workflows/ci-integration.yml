@@ -1,0 +1,43 @@
+# ARTIFACT-ONLY: written to spec, not run from this repo.
+# Requires a GCP project + billing, Workload Identity Federation between GitHub
+# and GCP, and branch protection making this a required check.
+# See .github/README.md for the live-verification checklist.
+#
+# Track B — integration. Runs on Google Cloud Build: spins up an ephemeral GKE
+# cluster with real eBPF LSM hooks, runs the attack scenarios, asserts backtrace
+# accuracy > 90%, then tears everything down. PR is blocked if this fails.
+name: ci-integration
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+# Least-privilege token for Workload Identity Federation.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # Gate the expensive run behind an explicit label so GKE isn't burned on
+    # every push.
+    if: contains(github.event.pull_request.labels.*.name, 'run-integration')
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_CI_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Submit ephemeral integration build (per-run isolated TF state)
+        run: |
+          gcloud builds submit \
+            --config infra/cloudbuild.yaml \
+            --substitutions _GITHUB_SHA=${{ github.sha }},_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}

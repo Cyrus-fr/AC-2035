@@ -1,0 +1,22 @@
+# Track A — unit / logic tests. Real, runnable on GitHub-hosted runners.
+# No cluster, no eBPF, no cloud credentials. This is the merge gate for every PR
+# and never uses simulation mode for the logic under test.
+name: ci-unit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run unit + logic tests
+        run: pytest tests/ -v

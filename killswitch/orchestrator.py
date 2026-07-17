@@ -248,6 +248,13 @@ def _execute_now(ao: dict, pending_id: str, triggered_by: str) -> KillSwitchResu
         triggered_by=triggered_by,
     )
     result.audit_path = str(_save_audit(result))
+    # U11 — stream the processed audit result to the immutable sink (best-effort).
+    try:
+        from research import immutable_sink
+
+        immutable_sink.write_audit(result.to_dict())
+    except Exception as e:
+        logger.warning("Immutable sink (audit) hook failed (non-fatal): {}", e)
     logger.info(
         "Kill-switch for token {} -> {} ({}/{} actions succeeded)",
         token_id, result.status, sum(1 for a in actions if a.success), len(actions),

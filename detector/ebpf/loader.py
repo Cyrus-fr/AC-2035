@@ -29,6 +29,11 @@ _MIN_KERNEL = (5, 7)
 # Programs to attach, keyed by the C function name (bpf_object__find_program_by_name).
 _PROGRAMS = ["ac2035_file_open", "ac2035_file_permission", "ac2035_execve", "ac2035_process_exit"]
 
+# U4 — pin maps under a restricted dir so they are tamper-evident (their
+# disappearance is a signal, see verify_attached) and survive across restarts.
+_PIN_DIR = "/sys/fs/bpf/ac2035"
+_PINNED_MAPS = ["watched_inodes", "events"]
+
 # ring_buffer sample callback: int (*)(void *ctx, void *data, size_t size)
 _RINGBUF_CB = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
 
@@ -44,7 +49,9 @@ class LoadedProgram:
     watched_inodes_fd: int
     events_fd: int
     links: list = field(default_factory=list)
+    attached: list = field(default_factory=list)  # names of successfully attached programs (U4)
     ringbuf: Optional[int] = None
+    pin_dir: Optional[str] = None  # dir the maps are pinned under, if any (U4)
     _cb_ref: Optional[Callable] = None  # keep the CFUNCTYPE alive
 
 
@@ -108,6 +115,11 @@ def _open_libbpf() -> "ctypes.CDLL":
     lib.ring_buffer__free.argtypes = [ctypes.c_void_p]
     lib.bpf_object__close.restype = None
     lib.bpf_object__close.argtypes = [ctypes.c_void_p]
+    # U4 — map pinning + pin lookup.
+    lib.bpf_map__pin.restype = ctypes.c_int
+    lib.bpf_map__pin.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    lib.bpf_obj_get.restype = ctypes.c_int
+    lib.bpf_obj_get.argtypes = [ctypes.c_char_p]
     return lib
 
 
@@ -159,13 +171,21 @@ def load_program(inode_map: Optional[dict] = None) -> LoadedProgram:
             logger.warning("Failed to attach {} (errno {})", prog_name, ctypes.get_errno())
             continue
         handle.links.append(link)
+        handle.attached.append(prog_name)
         logger.info("Attached eBPF program {}", prog_name)
 
     if inode_map:
         update_inodes(handle, inode_map)
 
+    # U4 — pin maps to a restricted dir (best-effort; a missing bpffs mount must
+    # not fail the load).
+    try:
+        pin_maps(handle)
+    except Exception as e:  # pragma: no cover — Linux/bpffs only
+        logger.warning("Map pinning skipped: {}", e)
+
     logger.info("Loaded honeytoken_watch.o: {} hook(s) attached, {} inode(s) watched",
-                len(handle.links), len(inode_map or {}))
+                len(handle.attached), len(inode_map or {}))
     return handle
 
 
@@ -233,3 +253,49 @@ def unload(handle: LoadedProgram) -> None:
         logger.info("Unloaded eBPF object and detached all hooks")
     except Exception as e:  # pragma: no cover
         logger.warning("Error during eBPF unload: {}", e)
+
+
+def pin_maps(handle: LoadedProgram, pin_dir: str = _PIN_DIR) -> None:
+    """Pin the BPF maps under a restricted directory (U4). Pinning makes the
+    maps tamper-evident — their disappearance is a signal picked up by
+    verify_attached — and survives across process restarts."""
+    os.makedirs(pin_dir, mode=0o700, exist_ok=True)
+    os.chmod(pin_dir, 0o700)
+    for name in _PINNED_MAPS:
+        path = os.path.join(pin_dir, name)
+        if os.path.exists(path):
+            continue  # already pinned
+        m = handle.lib.bpf_object__find_map_by_name(handle.obj, name.encode())
+        if not m:
+            logger.warning("pin_maps: map {} not found in object", name)
+            continue
+        if handle.lib.bpf_map__pin(m, path.encode()) != 0:
+            logger.warning("pin_maps: failed to pin {} -> {} (errno {})", name, path, ctypes.get_errno())
+        else:
+            logger.info("Pinned map {} -> {}", name, path)
+    handle.pin_dir = pin_dir
+
+
+def verify_attached(handle: LoadedProgram) -> list[str]:
+    """Best-effort tamper check (U4, Linux). Returns the names of hooks/maps
+    that look tampered — an empty list means healthy.
+
+    Two signals: (a) a program from _PROGRAMS not in handle.attached (never
+    attached, or lost), and (b) a pinned map missing from the pin dir (an
+    attacker unpinning/removing it). True per-link kernel liveness would need
+    bpf_link introspection; this is the documented approximation."""
+    missing: list[str] = [p for p in _PROGRAMS if p not in handle.attached]
+    if handle.pin_dir:
+        missing += [f"map:{n}" for n in _PINNED_MAPS if not os.path.exists(os.path.join(handle.pin_dir, n))]
+    return missing
+
+
+def reload_program(handle: LoadedProgram, inode_map: Optional[dict] = None) -> LoadedProgram:
+    """Tamper recovery (U4): unload the (possibly compromised) program, then
+    load + re-attach + re-pin a fresh one. Returns the new handle."""
+    logger.warning("Reloading eBPF program (tamper recovery)")
+    try:
+        unload(handle)
+    except Exception as e:  # pragma: no cover
+        logger.warning("reload: unload failed (continuing): {}", e)
+    return load_program(inode_map)

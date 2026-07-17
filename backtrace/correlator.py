@@ -11,6 +11,7 @@ proximity.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -165,3 +166,110 @@ def find_vpc_chain(src_ip: str, trigger_time: datetime, timeline: Optional[list[
 
     logger.info("VPC lateral chain from {}: {} node(s)", src_ip, len(chain))
     return chain
+
+
+# ── U7 correlation hardening — priority strategy chain ──────────────────────
+@dataclass
+class CorrelationResult:
+    """Outcome of the correlation chain. `unattributed` is a first-class state:
+    when no strategy matches we say so explicitly rather than forcing a
+    low-confidence path."""
+
+    entry_ip: Optional[str] = None
+    strategy: str = "unattributed"  # cf_ray / vpc_flow / temporal_lineage / unattributed
+    unattributed: bool = True
+    chain: list = field(default_factory=list)
+
+
+def vpc_entry(trigger_event, timeline: list[dict], window_minutes: int = VPC_WINDOW_MINUTES) -> Optional[str]:
+    """Secondary strategy: the earliest external source IP seen in VPC Flow
+    events in the window before the trigger (independent of Cloudflare)."""
+    trigger_dt = trigger_event.trigger_datetime
+    window_start = trigger_dt - timedelta(minutes=window_minutes)
+    best: Optional[tuple[datetime, str]] = None
+    for event in timeline:
+        if event.get("event_type") != "vpc_flow":
+            continue
+        ip = event.get("src_ip")
+        if not ip:
+            continue
+        ts = _parse(event.get("timestamp"))
+        if ts is None or not (window_start <= ts <= trigger_dt):
+            continue
+        if best is None or ts < best[0]:
+            best = (ts, ip)
+    if best:
+        logger.info("VPC-flow entry IP: {}", best[1])
+        return best[1]
+    return None
+
+
+def temporal_lineage_entry(trigger_event, timeline: list[dict], cluster_seconds: int = 120) -> Optional[str]:
+    """Tertiary strategy: cluster events within `cluster_seconds` before the
+    trigger; if eBPF process-lineage events are present (event_type
+    'process_exec', schema {timestamp, pid, ppid, comm, src_ip?}), walk the
+    ppid->pid chain from the triggering process back to its root and return that
+    root's src_ip. Otherwise fall back to the earliest external IP in the
+    cluster."""
+    trigger_dt = trigger_event.trigger_datetime
+    window_start = trigger_dt - timedelta(seconds=cluster_seconds)
+    cluster = [(ts, e) for e in timeline if (ts := _parse(e.get("timestamp"))) is not None
+               and window_start <= ts <= trigger_dt]
+    if not cluster:
+        return None
+
+    procs = {
+        e["pid"]: e for _ts, e in cluster
+        if e.get("event_type") == "process_exec" and e.get("pid") is not None
+    }
+    if procs:
+        pid = getattr(trigger_event, "pid", None)
+        seen: set = set()
+        root = None
+        while pid in procs and pid not in seen:
+            seen.add(pid)
+            root = procs[pid]
+            pid = root.get("ppid")
+        if root and root.get("src_ip"):
+            logger.info("Process-lineage entry IP: {} (root comm {})", root["src_ip"], root.get("comm"))
+            return root["src_ip"]
+
+    ips = sorted((ts, e.get("src_ip")) for ts, e in cluster if e.get("src_ip"))
+    if ips:
+        logger.info("Temporal-cluster entry IP: {}", ips[0][1])
+        return ips[0][1]
+    return None
+
+
+def _chain(ip: Optional[str], trigger_event, timeline: list[dict], driver) -> list[str]:
+    """Best-effort lateral chain for `ip`. Skipped when there's no graph driver,
+    so the strategy chain stays runnable offline / in unit tests."""
+    if driver is None or not ip:
+        return []
+    try:
+        return find_vpc_chain(ip, trigger_event.trigger_datetime, timeline, driver=driver)
+    except Exception as e:  # pragma: no cover
+        logger.warning("Chain build failed for {}: {}", ip, e)
+        return []
+
+
+def correlate_entry(trigger_event, timeline: list[dict], driver=None) -> CorrelationResult:
+    """Run the correlation strategies in priority order — first hit wins:
+    CF-Ray -> VPC Flow -> temporal clustering + process lineage -> unattributed."""
+    cf_ray = find_cf_ray(trigger_event, timeline)
+    if cf_ray:
+        ip = trace_entry(cf_ray, timeline, driver=driver)
+        if ip:
+            return CorrelationResult(ip, "cf_ray", False, _chain(ip, trigger_event, timeline, driver))
+
+    ip = vpc_entry(trigger_event, timeline)
+    if ip:
+        return CorrelationResult(ip, "vpc_flow", False, _chain(ip, trigger_event, timeline, driver))
+
+    ip = temporal_lineage_entry(trigger_event, timeline)
+    if ip:
+        return CorrelationResult(ip, "temporal_lineage", False, _chain(ip, trigger_event, timeline, driver))
+
+    logger.warning("Trigger for token {} is UNATTRIBUTED — no correlation strategy matched",
+                   trigger_event.token_id)
+    return CorrelationResult(None, "unattributed", True, [])

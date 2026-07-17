@@ -12,6 +12,9 @@ neo4j>=5.19
 google-cloud-pubsub>=2.21
 google-cloud-logging>=3.10
 google-cloud-secret-manager>=2.20
+# Immutable audit sink (U11). Optional at runtime — the sink degrades to a
+# local mirror if it's absent — but declared since it's the intended sink.
+google-cloud-storage>=2.10
 
 # ── Kubernetes / GKE ─────────────────────────────────
 kubernetes>=29.0

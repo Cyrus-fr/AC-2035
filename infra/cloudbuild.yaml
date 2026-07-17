@@ -1,0 +1,74 @@
+# ARTIFACT-ONLY: written to spec, not run from this repo.
+# Requires a GCP project + the bootstrap tfstate buckets (see infra/README.md).
+# Track B step 4 invokes the U8 scenarios + U9 evaluator (Research tier), which
+# are not built yet — this file documents the intended pipeline.
+#
+# Ephemeral integration build (U13 Track B): per-run isolated Terraform state,
+# real GKE + eBPF, attack scenarios, a >90% backtrace-accuracy gate, then full
+# teardown + deletion of this run's state prefix.
+substitutions:
+  _GITHUB_SHA: "local"
+  _PROJECT_ID: "ac2035"
+  _REGION: "us-central1"
+  _ACCURACY_MIN: "0.90"
+
+steps:
+  # 1. Provision an ephemeral cluster with per-run isolated state.
+  - id: terraform-apply
+    name: hashicorp/terraform:1.7
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        cd infra
+        terraform init \
+          -backend-config=backends/ci.gcs.tfbackend \
+          -backend-config="prefix=run-${_GITHUB_SHA}"
+        terraform apply -auto-approve \
+          -var="project_id=${_PROJECT_ID}" -var="environment=dev"
+
+  # 2. Fetch cluster credentials.
+  - id: gke-creds
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: sh
+    args:
+      - -c
+      - gcloud container clusters get-credentials ac2035-cluster --region ${_REGION} --project ${_PROJECT_ID}
+
+  # 3. Deploy honeytokens + load the real eBPF LSM hooks on the nodes.
+  - id: deploy-and-load-ebpf
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        python deployer/main.py deploy --all
+        python detector/demo_detector.py --real
+
+  # 4. Run the attack scenarios and FAIL if backtrace accuracy <= _ACCURACY_MIN.
+  #    (research/evaluator.py + tests/scenarios/ come from the Research tier.)
+  - id: scenarios-accuracy-gate
+    name: python:3.11
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        pip install -r requirements.txt
+        python research/evaluator.py --scenarios all --assert-accuracy ${_ACCURACY_MIN}
+
+  # 5. Tear everything down + delete this run's state prefix (belt-and-braces on
+  #    top of the CI bucket's 24h lifecycle rule).
+  - id: teardown
+    name: hashicorp/terraform:1.7
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        cd infra
+        terraform init -backend-config=backends/ci.gcs.tfbackend -backend-config="prefix=run-${_GITHUB_SHA}"
+        terraform destroy -auto-approve -var="project_id=${_PROJECT_ID}" -var="environment=dev"
+        gsutil -m rm -r gs://ac2035-tfstate-ci/run-${_GITHUB_SHA}/ || true
+
+timeout: 3600s
+options:
+  logging: CLOUD_LOGGING_ONLY

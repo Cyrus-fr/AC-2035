@@ -44,11 +44,16 @@ def _real_project_id() -> str:
 
 
 class TelemetryAgent:
-    def __init__(self, bpf_handle=None, pubsub_topic: str = "honeytoken-triggers"):
+    def __init__(self, bpf_handle=None, pubsub_topic: str = "honeytoken-triggers",
+                 watchdog_interval: int = 30, inode_map: Optional[dict] = None):
         self.bpf_handle = bpf_handle
         self.pubsub_topic = pubsub_topic
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_interval = watchdog_interval
+        self._inode_map = inode_map  # kept so a tamper-reload can re-populate (U4)
+        self._stop_event = threading.Event()
         self._publisher = None
         self._topic_path = None
         # hash → token_id hints, so simulate_event resolves without a registry.
@@ -140,6 +145,64 @@ class TelemetryAgent:
         except Exception as e:
             logger.warning("Pub/Sub publish failed for token {}: {}", trigger["token_id"], e)
 
+    # ── U4 tamper watchdog ─────────────────────────────────────────────────
+    def _publish_tamper(self, missing: list) -> None:
+        """Publish a CRITICAL eBPF-tamper alert to Pub/Sub and (best-effort)
+        the external notifier. Distinct from a TriggerEvent."""
+        alert = {
+            "type": "ebpf_tamper",
+            "severity": "critical",
+            "missing_hooks": list(missing),
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if self._publisher is None or self._topic_path is None:
+            logger.critical("[dry-run] eBPF TAMPER — would publish {}", json.dumps(alert))
+        else:
+            try:
+                self._publisher.publish(self._topic_path, json.dumps(alert).encode("utf-8")).result(timeout=10)
+                logger.critical("Published eBPF tamper alert: missing {}", missing)
+            except Exception as e:
+                logger.critical("eBPF TAMPER (missing {}) but Pub/Sub publish failed: {}", missing, e)
+        try:
+            import notifier
+
+            notifier.notify(
+                "ebpf_tamper", token_id="",
+                summary=f"eBPF hooks tampered: {', '.join(map(str, missing))}",
+                fields={"missing_hooks": ", ".join(map(str, missing))},
+            )
+        except Exception as e:  # notifier is non-fatal
+            logger.warning("Tamper notifier hook failed (non-fatal): {}", e)
+
+    def _watchdog_tick(self) -> bool:
+        """One tamper check. Returns True if healthy, False if tamper was
+        detected (an alert was published + a reload attempted). Unit-testable
+        without a kernel by monkeypatching loader.verify_attached."""
+        from detector.ebpf import loader
+
+        try:
+            missing = loader.verify_attached(self.bpf_handle)
+        except Exception as e:
+            logger.warning("Watchdog verify failed: {}", e)
+            return True  # a check error is not itself a tamper signal
+        if not missing:
+            return True
+        logger.critical("eBPF TAMPER DETECTED — missing hooks/maps: {}", missing)
+        self._publish_tamper(missing)
+        try:
+            self.bpf_handle = loader.reload_program(self.bpf_handle, self._inode_map)
+            logger.info("eBPF program reloaded after tamper")
+        except Exception as e:
+            logger.error("eBPF reload after tamper failed: {}", e)
+        return False
+
+    def _watchdog_loop(self) -> None:
+        logger.info("eBPF tamper watchdog started (every {}s)", self._watchdog_interval)
+        while self._running:
+            if self._stop_event.wait(self._watchdog_interval):
+                break
+            self._watchdog_tick()
+
     # ── lifecycle ──────────────────────────────────────────────────────────
     def start(self) -> None:
         """Start consuming the ring buffer in a background thread. Requires a
@@ -162,11 +225,20 @@ class TelemetryAgent:
         self._thread = threading.Thread(target=_loop, name="telemetry-agent", daemon=True)
         self._thread.start()
 
+        # U4 — start the tamper watchdog alongside the ring-buffer loop.
+        self._stop_event.clear()
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, name="ebpf-watchdog", daemon=True)
+        self._watchdog_thread.start()
+
     def stop(self) -> None:
         self._running = False
+        self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
+        if self._watchdog_thread is not None:
+            self._watchdog_thread.join(timeout=2)
+            self._watchdog_thread = None
         if self.bpf_handle is not None:
             from detector.ebpf import loader
 

@@ -88,6 +88,7 @@ export interface AttackObject {
   mitre_techniques: MitreTechnique[];
   all_paths: unknown[];
   reconstructed_at: string;
+  unattributed?: boolean;
 }
 
 export interface KillSwitchAction {
