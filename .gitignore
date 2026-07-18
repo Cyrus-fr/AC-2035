@@ -36,9 +36,11 @@ killswitch/audit/
 # ── Notifier fallback alerts (U0) ────────────────────
 notifier/fallback_alerts/
 
-# ── Research outputs (U5 calibration / U11 sink mirror) ─
+# ── Research outputs (U5 calibration / U9 evaluation / U11 sink mirror) ─
 research/immutable_local/
 research/calibration_report.json
+research/evaluation_results.json
+research/evaluation_report.md
 
 # ── Terraform ────────────────────────────────────────
 infra/.terraform/

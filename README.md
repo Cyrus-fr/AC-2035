@@ -483,12 +483,78 @@ research / CI scaffolding.
   eBPF, runs the scenarios, and gates on backtrace accuracy > 90%. See
   `.github/README.md`.
 
-The full suite (26 tests) runs on any box — no cloud, kernel, or Docker needed:
+The full suite runs on any box — no cloud, kernel, or Docker needed:
 
 ```bash
 pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
+
+## Production Upgrades — Research Tier
+
+The **Research tier** (U8–U10) adds the evidence layer for the paper: reproducible
+attacks, an objective metrics harness, and multi-cloud containment.
+
+- **U8 — Five reproducible APT scenarios** (`tests/scenarios/`): deterministic,
+  ground-truth-labeled attack scenarios (no randomness, no live cloud), each a
+  self-contained function returning `(TriggerEvent, list[NormalizedEvent],
+  GroundTruth)`. They cover **(1)** basic external CF-Ray entry, **(2)** three-hop
+  lateral movement, **(3)** an eBPF-evasion tamper attempt (ties in the U4
+  watchdog), **(4)** an insider with no external IP (exercises the U7 VPC-flow
+  fallback), and **(5)** a five-pod, 25-minute long-dwell credential harvest.
+  *Locally verified* (structure + determinism + real-correlator strategy).
+- **U9 — Metrics + paper evaluation report** (`research/evaluator.py`): runs the
+  five scenarios through the engine and measures **detection latency, backtrace
+  accuracy, false-positive rate, per-tier confidence precision** (reusing the U5
+  calibrator), and **unattributed rate**, writing `research/evaluation_results.json`
+  and a paper-ready `research/evaluation_report.md`. Runs offline against a
+  driver-free **reference engine** (real `correlate_entry` + telemetry-ordered
+  path); `--real` uses the full Neo4j graph engine. *Locally verified* with a
+  mocked engine; genuine graph-path accuracy is *artifact-only* (needs Neo4j).
+
+  ```bash
+  python research/evaluator.py                              # offline reference run
+  python research/evaluator.py --scenarios all --assert-accuracy 0.90
+  ```
+- **U10 — Multi-cloud providers** (`killswitch/providers/{aws,azure}.py`): the
+  AWS + Azure providers the U2 abstraction promised, implementing the full
+  `available/execute/verify/rollback` lifecycle. **AWS** strips every managed +
+  inline policy from the compromised IAM user (capturing them for rollback);
+  **Azure** removes every subscription-scope role assignment for the compromised
+  principal. Both degrade gracefully when the SDK/creds are absent and stay
+  `enabled: false` in `killswitch/config.yaml` until real credentials are set.
+  *Locally verified* (degradation + execute/verify/rollback with mocked SDK
+  clients); live IAM/role revocation is *artifact-only*.
+
+The full suite (**53 tests**) runs on any box — no cloud, kernel, or Docker:
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+## Production Upgrade Summary
+
+All 14 post-phase upgrades (U0–U13) across the three tiers:
+
+| # | Tier | Status | Upgrade |
+|---|---|---|---|
+| U0 | Critical | ✅ | External alerting (Slack/Discord/PagerDuty) with per-channel circuit breaker + `.alert` fallback |
+| U1 | Critical | ✅ | No silent simulation — collector refuses to fabricate telemetry; simulation is opt-in |
+| U2 | Critical | ✅ | Pluggable kill-switch providers + compensating rollback (default off, sticky containment) |
+| U3 | Critical | ✅ | Post-action verification — a fired-but-unverified action drops the run to `partial` |
+| U12 | Critical | 📦 | Immutable GCS Object-Lock audit bucket + per-env isolated CI state (artifact-only) |
+| U4 | Important | ✅/📦 | eBPF tamper watchdog (map pinning + reattach) — logic verified, kernel artifact-only |
+| U5 | Important | ✅ | Backtrace confidence calibration — precision/recall per HIGH/MEDIUM/LOW tier |
+| U6 | Important | ✅ | Neo4j memory tuning + self-pruning graph (old rels/orphans, runaway alert) |
+| U7 | Important | ✅ | Correlation hardening — CF-Ray → VPC-flow → temporal lineage → first-class `unattributed` |
+| U11 | Important | ✅/📦 | Immutable audit sink (raw-first, processed-second) — logic verified, live GCS artifact-only |
+| U13 | Important | ✅/📦 | Two-track CI — Track A real `pytest` gate; Track B GKE/eBPF integration artifact-only |
+| U8 | Research | ✅ | Five reproducible, ground-truth-labeled APT scenarios |
+| U9 | Research | ✅/📦 | Metrics evaluator + paper report — offline verified, real-Neo4j accuracy artifact-only |
+| U10 | Research | ✅/📦 | AWS + Azure kill-switch providers — logic verified, live revocation artifact-only |
+
+Legend: ✅ locally verified · 📦 artifact-only (written to spec, mock-tested, live checklist) · ✅/📦 verified logic + artifact-only live path.
 
 ## Build Phases
 

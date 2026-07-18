@@ -1,7 +1,8 @@
 # ARTIFACT-ONLY: written to spec, not run from this repo.
 # Requires a GCP project + the bootstrap tfstate buckets (see infra/README.md).
-# Track B step 4 invokes the U8 scenarios + U9 evaluator (Research tier), which
-# are not built yet — this file documents the intended pipeline.
+# Track B step 4 invokes the U8 scenarios (tests/scenarios/) + the U9 evaluator
+# (research/evaluator.py), which now exist — that step's command is runnable;
+# the surrounding GKE + eBPF provisioning remains artifact-only.
 #
 # Ephemeral integration build (U13 Track B): per-run isolated Terraform state,
 # real GKE + eBPF, attack scenarios, a >90% backtrace-accuracy gate, then full
@@ -46,7 +47,7 @@ steps:
         python detector/demo_detector.py --real
 
   # 4. Run the attack scenarios and FAIL if backtrace accuracy <= _ACCURACY_MIN.
-  #    (research/evaluator.py + tests/scenarios/ come from the Research tier.)
+  #    (research/evaluator.py + tests/scenarios/ are the Research-tier U8/U9.)
   - id: scenarios-accuracy-gate
     name: python:3.11
     entrypoint: sh

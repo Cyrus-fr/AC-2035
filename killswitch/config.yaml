@@ -14,13 +14,14 @@ providers:
   - name: zitadel
     class: "killswitch.providers.zitadel:ZitadelProvider"
     enabled: true
-  # Multi-cloud stubs — implementation deferred to U10. Keep disabled.
+  # Multi-cloud providers (implemented in U10). Keep disabled until real AWS /
+  # Azure credentials are present in .env; each degrades gracefully otherwise.
   - name: aws
     class: "killswitch.providers.aws:AWSProvider"
-    enabled: false
+    enabled: false  # enable when AWS_ACCESS_KEY_ID / AWS_REGION are set
   - name: azure
     class: "killswitch.providers.azure:AzureProvider"
-    enabled: false
+    enabled: false  # enable when AZURE_TENANT_ID/CLIENT_ID/SECRET/SUBSCRIPTION_ID are set
 
 # U3 — after each action fires, re-fetch the control plane to confirm it took
 # effect. A fired-but-unverified action downgrades the whole run to "partial".

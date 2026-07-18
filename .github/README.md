@@ -10,8 +10,11 @@ simulation mode for the logic under test. This is the suite verified locally
 
 ## Track B — `.github/workflows/ci-integration.yml` + `infra/cloudbuild.yaml` (ARTIFACT-ONLY)
 > Written to spec, **not run** from this repo. Requires a GCP project, billing,
-> Workload Identity Federation, and (Research tier) the U8 scenarios + U9
-> evaluator that `infra/cloudbuild.yaml` step 4 invokes.
+> and Workload Identity Federation. Step 4's accuracy gate — the U8 scenarios
+> (`tests/scenarios/`) + the U9 evaluator (`research/evaluator.py`) — now exists
+> and is runnable locally (`python research/evaluator.py --scenarios all
+> --assert-accuracy 0.90`); the surrounding GKE + eBPF provisioning is what keeps
+> Track B artifact-only.
 
 On a PR labeled `run-integration`, GitHub authenticates to GCP via WIF and
 submits `infra/cloudbuild.yaml` to Cloud Build, which:
